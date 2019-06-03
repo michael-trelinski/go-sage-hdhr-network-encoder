@@ -370,16 +370,16 @@ func broadcastService(port int, encoders []NetworkEncoder, wg *sync.WaitGroup) {
 func main() {
 	globalEnv := GlobalEnvironmentVariables{}
 
-	flag.StringVarP(&globalEnv.baseName, "base-name", "bn", "go hdhr prime", "base name for the encoders")
-	flag.StringVarP(&globalEnv.encoderID, "encoder-id", "id", "1234569", "encoder ID as a number")
-	flag.StringVarP(&globalEnv.hdhrIP, "hdhr-ip", "ip", "localhost", "this is the ip of the HDHR encoder; do not leave blank.")
-	flag.IntVarP(&globalEnv.numEncoders, "num-encoders", "n", 3, "number of hdhr encoders")
-	flag.StringVarP(&globalEnv.pathSearch, "path-search", "ps", "/var/media/tv/", "this is the needle in the haystack")
-	flag.StringVarP(&globalEnv.pathReplace, "path-replace", "pr", "/var/media/tv/", "(...and this is the haystack) if found in path search, the path to replace")
+	flag.StringVarP(&globalEnv.baseName, "base-name", "n", "go hdhr prime", "base name for the encoders")
+	flag.StringVarP(&globalEnv.encoderID, "encoder-id", "e", "1234569", "encoder ID as a number")
+	flag.StringVarP(&globalEnv.hdhrIP, "hdhr-ip", "i", "localhost", "this is the ip of the HDHR encoder; do not leave blank.")
+	flag.IntVarP(&globalEnv.numEncoders, "num-encoders", "x", 3, "number of hdhr encoders")
+	flag.StringVarP(&globalEnv.pathSearch, "path-search", "s", "/var/media/tv/", "this is the needle in the haystack")
+	flag.StringVarP(&globalEnv.pathReplace, "path-replace", "r", "/var/media/tv/", "(...and this is the haystack) if found in path search, the path to replace")
 	flag.IntVarP(&globalEnv.startPort, "start-port", "p", 31336, "the first encoder will have this value + 1, then + 2, then + 3, then + ... num-encoders")
-	flag.IntVarP(&globalEnv.versionMajor, "version-major", "va", 4, "the major version to report to sage tv, i.e. the 'a' in a.b.c")
-	flag.IntVarP(&globalEnv.versionMinor, "version-minor", "vb", 1, "the minor version to report to sage tv, i.e. the 'b' in a.b.c")
-	flag.IntVarP(&globalEnv.versionDev, "version-dev", "vc", 0, "the dev version to report to sage tv, i.e. the 'c' in a.b.c")
+	flag.IntVarP(&globalEnv.versionMajor, "version-major", "a", 4, "the major version to report to sage tv, i.e. the 'a' in a.b.c")
+	flag.IntVarP(&globalEnv.versionMinor, "version-minor", "b", 1, "the minor version to report to sage tv, i.e. the 'b' in a.b.c")
+	flag.IntVarP(&globalEnv.versionDev, "version-dev", "c", 0, "the dev version to report to sage tv, i.e. the 'c' in a.b.c")
 
 	flag.Parse()
 
