@@ -16,6 +16,7 @@ import (
 	"net/http"
 
 	"github.com/matryer/runner"
+	cmap "github.com/orcaman/concurrent-map"
 	flag "github.com/spf13/pflag"
 )
 
@@ -40,8 +41,8 @@ type NetworkEncoder struct {
 // EncoderEnvironments is the actual global configuration and state, shared by all processes that need it
 type EncoderEnvironments struct {
 	globalEnvironment *GlobalEnvironmentVariables
-	tunerNamesToTasks map[string]*runner.Task
-	tunerPathsToSize  map[string]int
+	tunerNamesToTasks cmap.ConcurrentMap
+	tunerPathsToSize  cmap.ConcurrentMap
 }
 
 // GlobalEnvironmentVariables is Configurable at launch time global variables
@@ -156,7 +157,7 @@ func (ne *NetworkEncoder) start(command string) []string {
 	if err != nil {
 		return ne.fail()
 	}
-	ne.env.tunerNamesToTasks[params["TunerName"]] = ne.openChannel(channel, params["Path"])
+	ne.env.tunerNamesToTasks.Set(params["TunerName"], ne.openChannel(channel, params["Path"]))
 	return ne.ok()
 }
 
@@ -208,13 +209,13 @@ func (ne *NetworkEncoder) openChannel(channel int, path string) *runner.Task {
 			return streamErr
 		}
 		buf := bufio.NewReader(streamRes.Body)
-		ne.env.tunerPathsToSize[path] = 0
+		ne.env.tunerPathsToSize.Set(path, 0)
 		defer func() {
 			// do teardown
 			streamRes.Body.Close()
 			streamOut.Flush()
 			outFile.Close()
-			delete(ne.env.tunerPathsToSize, path)
+			ne.env.tunerPathsToSize.Remove(path)
 		}()
 		log.Println("Executing > fetching ...")
 		for {
@@ -228,7 +229,13 @@ func (ne *NetworkEncoder) openChannel(channel int, path string) *runner.Task {
 			}
 			if n > 0 {
 				streamOut.Flush()
-				ne.env.tunerPathsToSize[path] += int(n)
+				// the following is fine without locking since only one thread will be increasing the values:
+				prev, found := ne.env.tunerPathsToSize.Get(path)
+				lastValue := 0
+				if found {
+					lastValue = prev.(int)
+				}
+				ne.env.tunerPathsToSize.Set(path, int(n)+lastValue)
 			}
 		}
 		log.Println("Destroying > Fetching channel", channel, "which is", streamURL)
@@ -244,17 +251,17 @@ func (ne *NetworkEncoder) buffer(command string) []string {
 	if err != nil {
 		return ne.fail()
 	}
-	ne.env.tunerNamesToTasks[params["TunerName"]] = ne.openChannel(channel, params["Path"])
+	ne.env.tunerNamesToTasks.Set(params["TunerName"], ne.openChannel(channel, params["Path"]))
 	return ne.ok()
 }
 
 func (ne *NetworkEncoder) getFileSize(command string) []string {
 	// 'GET_FILE_SIZE /var/media/tv/asdf-0.mpgbuf'
 	path := strings.TrimSpace(strings.SplitN(strings.TrimSpace(command), " ", 2)[1])
-	size, found := ne.env.tunerPathsToSize[path]
+	size, found := ne.env.tunerPathsToSize.Get(path)
 	if found {
 		log.Println("Size:", size)
-		return []string{strconv.Itoa(size)}
+		return []string{strconv.Itoa(size.(int))}
 	}
 	log.Println("Size: NA")
 	return []string{"0"}
@@ -263,10 +270,10 @@ func (ne *NetworkEncoder) getFileSize(command string) []string {
 func (ne *NetworkEncoder) stop(command string) []string {
 	// 'STOP go hdhr prime 1 TV Tuner'
 	tunerName := strings.TrimSpace(strings.SplitN(strings.TrimSpace(command), " ", 2)[1])
-	task, found := ne.env.tunerNamesToTasks[tunerName]
+	task, found := ne.env.tunerNamesToTasks.Get(tunerName)
 	if found {
-		task.Stop()
-		delete(ne.env.tunerPathsToSize, tunerName)
+		task.(*runner.Task).Stop()
+		ne.env.tunerNamesToTasks.Remove(tunerName)
 	}
 	return ne.ok()
 }
@@ -382,11 +389,10 @@ func main() {
 	flag.IntVarP(&globalEnv.versionDev, "version-dev", "c", 0, "the dev version to report to sage tv, i.e. the 'c' in a.b.c")
 
 	flag.Parse()
-
 	env := EncoderEnvironments{
 		globalEnvironment: &globalEnv,
-		tunerNamesToTasks: make(map[string]*runner.Task),
-		tunerPathsToSize:  make(map[string]int)}
+		tunerNamesToTasks: cmap.New(),
+		tunerPathsToSize:  cmap.New()}
 	log.Printf("Configuration/Environment: %+v\n", env)
 
 	log.Println("Creating encoders...")
