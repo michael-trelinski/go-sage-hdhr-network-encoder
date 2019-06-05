@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"io/ioutil"
 	"log"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"net/http"
 
@@ -40,9 +42,10 @@ type NetworkEncoder struct {
 
 // EncoderEnvironments is the actual global configuration and state, shared by all processes that need it
 type EncoderEnvironments struct {
-	globalEnvironment *GlobalEnvironmentVariables
-	tunerNamesToTasks cmap.ConcurrentMap
-	tunerPathsToSize  cmap.ConcurrentMap
+	globalEnvironment  *GlobalEnvironmentVariables
+	tunerNamesToTasks  cmap.ConcurrentMap
+	tunerPathsToSize   cmap.ConcurrentMap
+	currentConnections int32
 }
 
 // GlobalEnvironmentVariables is Configurable at launch time global variables
@@ -209,7 +212,7 @@ func (ne *NetworkEncoder) openChannel(channel int, path string) *runner.Task {
 			return streamErr
 		}
 		buf := bufio.NewReader(streamRes.Body)
-		ne.env.tunerPathsToSize.Set(path, 0)
+		ne.env.tunerPathsToSize.Set(path, int64(0))
 		defer func() {
 			// do teardown
 			streamRes.Body.Close()
@@ -231,11 +234,11 @@ func (ne *NetworkEncoder) openChannel(channel int, path string) *runner.Task {
 				streamOut.Flush()
 				// the following is fine without locking since only one thread will be increasing the values:
 				prev, found := ne.env.tunerPathsToSize.Get(path)
-				lastValue := 0
+				var lastValue int64
 				if found {
-					lastValue = prev.(int)
+					lastValue = prev.(int64)
 				}
-				ne.env.tunerPathsToSize.Set(path, int(n)+lastValue)
+				ne.env.tunerPathsToSize.Set(path, n+lastValue)
 			}
 		}
 		log.Println("Destroying > Fetching channel", channel, "which is", streamURL)
@@ -258,9 +261,8 @@ func (ne *NetworkEncoder) buffer(command string) []string {
 func (ne *NetworkEncoder) getFileSize(command string) []string {
 	// 'GET_FILE_SIZE /var/media/tv/asdf-0.mpgbuf'
 	path := strings.TrimSpace(strings.SplitN(strings.TrimSpace(command), " ", 2)[1])
-	size, found := ne.env.tunerPathsToSize.Get(path)
-	if found {
-		return []string{strconv.Itoa(size.(int))}
+	if size, found := ne.env.tunerPathsToSize.Get(path); found {
+		return []string{strconv.FormatInt(size.(int64), 10)}
 	}
 	log.Println("Size: NA")
 	return []string{"0"}
@@ -269,12 +271,32 @@ func (ne *NetworkEncoder) getFileSize(command string) []string {
 func (ne *NetworkEncoder) stop(command string) []string {
 	// 'STOP go hdhr prime 1 TV Tuner'
 	tunerName := strings.TrimSpace(strings.SplitN(strings.TrimSpace(command), " ", 2)[1])
-	task, found := ne.env.tunerNamesToTasks.Get(tunerName)
-	if found {
+	if task, found := ne.env.tunerNamesToTasks.Get(tunerName); found {
 		task.(*runner.Task).Stop()
 		ne.env.tunerNamesToTasks.Remove(tunerName)
 	}
 	return ne.ok()
+}
+
+func (ne *NetworkEncoder) dump() []string {
+	// 'dump'
+	s := make([]string, 0)
+	s = append(s, fmt.Sprintf("Globals environment: %+v\n\n", ne.env.globalEnvironment))
+	s = append(s, "Environment (tasks):\n")
+	for _, k := range ne.env.tunerNamesToTasks.Keys() {
+		if v, found := ne.env.tunerNamesToTasks.Get(k); found {
+			s = append(s, fmt.Sprintf("\t''%s' -> %+v\n", k, v))
+		}
+	}
+	s = append(s, "Environment (sizes):\n")
+	for _, k := range ne.env.tunerPathsToSize.Keys() {
+		if v, found := ne.env.tunerPathsToSize.Get(k); found {
+			s = append(s, fmt.Sprintf("\t''%s' -> %+v\n", k, v))
+		}
+	}
+	s = append(s, fmt.Sprintf("Environment (active connections): %+d\n", ne.env.currentConnections))
+	s = append(s, ne.ok()...)
+	return s
 }
 
 func (ne *NetworkEncoder) execute(line string) []string {
@@ -298,6 +320,8 @@ func (ne *NetworkEncoder) execute(line string) []string {
 		data = append(data, ne.getFileSize(line)...)
 	case "q":
 		panic("Quitting")
+	case "dump":
+		data = append(data, ne.dump()...)
 	default:
 		log.Printf("Unhandled: '%s'\n", line)
 	}
@@ -306,7 +330,11 @@ func (ne *NetworkEncoder) execute(line string) []string {
 
 func (ne *NetworkEncoder) handle(conn net.Conn) {
 	log.Printf("Handling connection: %s from %+v %s, port: %d lineup: %d\n", conn, ne.env, ne.name, ne.port, len(ne.lineup))
-	defer conn.Close()
+	atomic.AddInt32(&ne.env.currentConnections, 1)
+	defer func() {
+		conn.Close()
+		atomic.AddInt32(&ne.env.currentConnections, ^int32(0))
+	}()
 	for {
 		line, err := readLine(conn)
 		if err == nil {
