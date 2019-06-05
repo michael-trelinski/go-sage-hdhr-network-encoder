@@ -260,7 +260,6 @@ func (ne *NetworkEncoder) getFileSize(command string) []string {
 	path := strings.TrimSpace(strings.SplitN(strings.TrimSpace(command), " ", 2)[1])
 	size, found := ne.env.tunerPathsToSize.Get(path)
 	if found {
-		log.Println("Size:", size)
 		return []string{strconv.Itoa(size.(int))}
 	}
 	log.Println("Size: NA")
@@ -306,7 +305,7 @@ func (ne *NetworkEncoder) execute(line string) []string {
 }
 
 func (ne *NetworkEncoder) handle(conn net.Conn) {
-	log.Printf("Handling connection: %s from %+v\n", conn, *ne)
+	log.Printf("Handling connection: %s from %+v %s, port: %d lineup: %d\n", conn, ne.env, ne.name, ne.port, len(ne.lineup))
 	defer conn.Close()
 	for {
 		line, err := readLine(conn)
@@ -356,8 +355,8 @@ func broadcastService(port int, encoders []NetworkEncoder, wg *sync.WaitGroup) {
 		buffer := make([]byte, 128)
 		n, addr, err := ln.ReadFrom(buffer)
 		if err == nil && n > 0 {
-			log.Println("Got UDP packet: ", string(buffer))
 			go func() {
+				log.Println("Got UDP packet: ", string(buffer))
 				for _, encoder := range encoders {
 					reply := make([]byte, 0)
 					reply = append(reply, byte(83), byte(84), byte(78))                                                                                                                                // the first 3 bytes are the "magic" signature
