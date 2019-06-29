@@ -52,6 +52,7 @@ type GlobalEnvironmentVariables struct {
 	versionMajor int
 	versionMinor int
 	versionDev   int
+	bufferSize   int
 	pathSearch   string
 	pathReplace  string
 	hdhrIP       string
@@ -198,7 +199,7 @@ func (ne *NetworkEncoder) openChannel(channel int, path string) *runner.Task {
 	return runner.Go(func(shouldStop runner.S) error {
 		// do setup
 		log.Println("Executing > Fetching channel", channel, "which is", streamURL)
-		bufferSize := int64(32767)
+		bufferSize := int64(ne.env.globalEnvironment.bufferSize)
 		buffer := make([]byte, bufferSize)
 		outFile, outErr := os.OpenFile(ne.getNewPath(path), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0777)
 		if outErr != nil {
@@ -419,6 +420,7 @@ func main() {
 	flag.IntVarP(&globalEnv.versionMajor, "version-major", "a", 4, "the major version to report to sage tv, i.e. the 'a' in a.b.c")
 	flag.IntVarP(&globalEnv.versionMinor, "version-minor", "b", 1, "the minor version to report to sage tv, i.e. the 'b' in a.b.c")
 	flag.IntVarP(&globalEnv.versionDev, "version-dev", "c", 0, "the dev version to report to sage tv, i.e. the 'c' in a.b.c")
+	flag.IntVar(&globalEnv.bufferSize, "buffer-size", 8192, "the temporary buffer size for channel tuning")
 
 	flag.Parse()
 	env := EncoderEnvironments{
