@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/ioutil"
 	"log"
 	"net"
@@ -200,6 +199,7 @@ func (ne *NetworkEncoder) openChannel(channel int, path string) *runner.Task {
 		// do setup
 		log.Println("Executing > Fetching channel", channel, "which is", streamURL)
 		bufferSize := int64(32767)
+		buffer := make([]byte, bufferSize)
 		outFile, outErr := os.OpenFile(ne.getNewPath(path), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0777)
 		if outErr != nil {
 			log.Fatal(outErr)
@@ -225,20 +225,24 @@ func (ne *NetworkEncoder) openChannel(channel int, path string) *runner.Task {
 			if shouldStop() {
 				break
 			}
-			n, err := io.CopyN(streamOut, buf, bufferSize)
-			if err != nil {
-				log.Fatal(err)
-				return err
-			}
-			if n > 0 {
-				streamOut.Flush()
-				// the following is fine without locking since only one thread will be increasing the values:
-				prev, found := ne.env.tunerPathsToSize.Get(path)
-				var lastValue int64
-				if found {
-					lastValue = prev.(int64)
+			if bytesRead, readErr := buf.Read(buffer); readErr == nil && bytesRead > 0 {
+				if shouldStop() {
+					break
 				}
-				ne.env.tunerPathsToSize.Set(path, n+lastValue)
+				if bytesWritten, writeErr := streamOut.Write(buffer[0:bytesRead]); writeErr == nil {
+					prev, found := ne.env.tunerPathsToSize.Get(path)
+					var lastValue int64
+					if found {
+						lastValue = prev.(int64)
+					}
+					ne.env.tunerPathsToSize.Set(path, int64(bytesWritten)+lastValue)
+				} else if writeErr != nil {
+					log.Fatal(writeErr)
+					return writeErr
+				}
+			} else if readErr != nil {
+				log.Fatal(readErr)
+				return readErr
 			}
 		}
 		log.Println("Destroying > Fetching channel", channel, "which is", streamURL)
@@ -324,6 +328,7 @@ func (ne *NetworkEncoder) execute(line string) []string {
 		data = append(data, ne.dump()...)
 	default:
 		log.Printf("Unhandled: '%s'\n", line)
+		data = append(data, ne.ok()...)
 	}
 	return data
 }
